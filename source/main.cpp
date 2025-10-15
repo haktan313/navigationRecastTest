@@ -10,6 +10,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
+
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -51,6 +55,12 @@ int main()
     }
     
     glEnable(GL_DEPTH_TEST);
+
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
     
     Shader ourShader("../source/shaders/simple.vert", "../source/shaders/simple.frag");
     
@@ -111,6 +121,14 @@ int main()
 
         processInput(window);
 
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        ImGui::Begin("Control Panel");
+        if (ImGui::Button("Build NavMesh"))
+            std::cout << "NavMesh build triggered!" << std::endl;
+        ImGui::End();
+
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -137,6 +155,9 @@ int main()
         glBindVertexArray(boxVAO);
         glDrawArrays(GL_TRIANGLES, 0, 36);
 
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -146,6 +167,9 @@ int main()
     glDeleteBuffers(1, &planeVBO);
     glDeleteBuffers(1, &boxVBO);
 
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     glfwTerminate();
     return 0;
 }
@@ -154,6 +178,7 @@ void processInput(GLFWwindow *window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+    
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         camera.ProcessKeyboard(FORWARD, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -162,6 +187,11 @@ void processInput(GLFWwindow *window)
         camera.ProcessKeyboard(LEFT, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera.ProcessKeyboard(RIGHT, deltaTime);
+    
+    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    else
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
@@ -171,17 +201,20 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 void mouse_callback(GLFWwindow* window, double xposIn, double yposIn)
 {
-    float xpos = static_cast<float>(xposIn);
-    float ypos = static_cast<float>(yposIn);
-    if (firstMouse)
+    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
     {
+        float xpos = static_cast<float>(xposIn);
+        float ypos = static_cast<float>(yposIn);
+        if (firstMouse)
+        {
+            lastX = xpos;
+            lastY = ypos;
+            firstMouse = false;
+        }
+        float xoffset = xpos - lastX;
+        float yoffset = lastY - ypos; 
         lastX = xpos;
         lastY = ypos;
-        firstMouse = false;
+        camera.ProcessMouseMovement(xoffset, yoffset);
     }
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; 
-    lastX = xpos;
-    lastY = ypos;
-    camera.ProcessMouseMovement(xoffset, yoffset);
 }

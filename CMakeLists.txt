@@ -5,10 +5,23 @@ project(NavMeshDemo)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-
 file(GLOB OUR_SOURCES "source/*.cpp" "source/*.h")
-
 file(GLOB SHADER_FILES "source/shaders/*.vert" "source/shaders/*.frag")
+
+set(IMGUI_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/imgui.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/imgui_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/imgui.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/imgui_draw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/imgui_tables.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/imgui_widgets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/backends/imgui_impl_glfw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4/backends/imgui_impl_opengl3.cpp
+)
+
+add_library(imgui STATIC ${IMGUI_SOURCES})
+target_include_directories(imgui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libs/imgui-1.92.4)
+target_link_libraries(imgui PUBLIC glfw)
 
 add_library(glfw INTERFACE)
 target_include_directories(glfw SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/libs/glfw-3.4.bin.WIN64/include)
@@ -25,4 +38,4 @@ add_executable(NavMeshDemo ${OUR_SOURCES} ${SHADER_FILES})
 
 target_include_directories(NavMeshDemo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/source)
 
-target_link_libraries(NavMeshDemo PRIVATE glfw glad glm opengl32 gdi32)
+target_link_libraries(NavMeshDemo PRIVATE glfw glad glm imgui opengl32 gdi32)
