@@ -52,7 +52,7 @@ int main()
     
     glEnable(GL_DEPTH_TEST);
     
-    Shader ourShader("source/shaders/simple.vert", "source/shaders/simple.frag");
+    Shader ourShader("../source/shaders/simple.vert", "../source/shaders/simple.frag");
     
     float planeVertices[] = {
          15.0f, 0.0f,  15.0f,
