@@ -19,3 +19,5 @@ cmake_install.cmake
 *.so
 *.a
 *.obj
+
+libs/glm-1.0.2/doc/**/*.html
