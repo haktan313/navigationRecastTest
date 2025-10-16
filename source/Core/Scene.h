@@ -38,6 +38,7 @@ public:
 
     SceneObject* AddObject(const std::string& name, const std::string& meshName, const glm::mat4& modelMatrix = glm::mat4(1.0f));
     const std::vector<SceneObject>& GetObjects() const { return m_Objects; }
+    const MeshData* GetMesh(const std::string& meshName) const;
 private:
     void CreateDefaultMeshes();
     

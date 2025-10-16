@@ -75,6 +75,14 @@ SceneObject* Scene::AddObject(const std::string& name, const std::string& meshNa
     return &m_Objects.back();
 }
 
+const MeshData* Scene::GetMesh(const std::string& meshName) const
+{
+    auto it = m_Meshes.find(meshName);
+    if (it != m_Meshes.end())
+        return &it->second;
+    return nullptr;
+}
+
 void Scene::CreateDefaultMeshes()
 {
     MeshData cubeMesh;

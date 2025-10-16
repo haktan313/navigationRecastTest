@@ -1,4 +1,6 @@
+
 #include "NavigationSystem.h"
+#include <glm/ext/matrix_transform.hpp>
 
 NavigationSystem::NavigationSystem() : m_InputTriangles(), m_NavMesh(), m_DebugVAO(0), m_DebugVBO(0)
 {
@@ -48,25 +50,137 @@ void NavigationSystem::BuildNavMesh(const Scene& scene)
         }
     }
     std::cout << "Collected " << m_InputTriangles.size() << " triangles for NavMesh." << std::endl;
+    Voxelize();
     UpdateDebugBuffers();
 }
 
-void NavigationSystem::RenderDebugNavmesh(Shader* debugShader)
+void NavigationSystem::RenderDebugNavmesh(Shader* debugShader, const Scene& scene)
 {
-    if (m_DebugVAO == 0 || m_InputTriangles.empty())
-        return;
+    DrawTriangle(debugShader, scene);
+    DrawVoxels(debugShader, scene);
+    DrawVoxelGridBounds(debugShader, scene);
     
-    debugShader->setMat4("model", glm::mat4(1.0f));
-    
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    debugShader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 0.0f, 1.0f)); 
-    
-    glBindVertexArray(m_DebugVAO);
-    glDrawArrays(GL_TRIANGLES, 0, m_InputTriangles.size() * 3);
-    
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
     glBindVertexArray(0);
+}
+
+void NavigationSystem::DrawTriangle(Shader* shader, const Scene& scene)
+{
+    if (m_DebugVAO != 0 && !m_InputTriangles.empty())
+    {
+        shader->setMat4("model", glm::mat4(1.0f));
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        shader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 0.0f, 1.0f));
+        
+        glBindVertexArray(m_DebugVAO);
+        glDrawArrays(GL_TRIANGLES, 0, m_InputTriangles.size() * 3);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+}
+
+void NavigationSystem::DrawVoxels(Shader* shader, const Scene& scene)
+{
+    if (m_VoxelGrid.width > 0)
+    {
+        const MeshData* cubeMesh = scene.GetMesh("Cube");
+        if (cubeMesh)
+        {
+            glm::vec3 size = m_VoxelGrid.maximumCorner - m_VoxelGrid.minimumCorner;
+            glm::vec3 center = (m_VoxelGrid.minimumCorner + m_VoxelGrid.maximumCorner) * 0.5f;
+
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, center);
+            model = glm::scale(model, size);
+            shader->setMat4("model", model);
+            shader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 1.0f, 0.5f));
+            
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            
+            glBindVertexArray(cubeMesh->VAO);
+            glDrawElements(GL_TRIANGLES, cubeMesh->indices.size(), GL_UNSIGNED_INT, 0);
+            
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glDisable(GL_BLEND);
+        }
+    }
+}
+
+void NavigationSystem::DrawVoxelGridBounds(Shader* shader, const Scene& scene)
+{
+    if (m_VoxelGrid.width > 0 && !m_VoxelGrid.data.empty())
+    {
+        const MeshData* cubeMesh = scene.GetMesh("Cube");
+        if (cubeMesh)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBindVertexArray(cubeMesh->VAO);
+            
+            for (int z = 0; z < m_VoxelGrid.depth; ++z)
+            {
+                for (int y = 0; y < m_VoxelGrid.height; ++y)
+                {
+                    for (int x = 0; x < m_VoxelGrid.width; ++x)
+                    {
+                        int index = x + z * m_VoxelGrid.width + y * m_VoxelGrid.width * m_VoxelGrid.depth;
+                        bool isSolid = m_VoxelGrid.data[index];
+                        
+                        glm::vec3 pos = {
+                            m_VoxelGrid.minimumCorner.x + (x + 0.5f) * m_VoxelGrid.cellSize,
+                            m_VoxelGrid.minimumCorner.y + (y + 0.5f) * m_VoxelGrid.cellHeight,
+                            m_VoxelGrid.minimumCorner.z + (z + 0.5f) * m_VoxelGrid.cellSize
+                        };
+                        glm::mat4 model = glm::mat4(1.0f);
+                        model = glm::translate(model, pos);
+                        model = glm::scale(model, glm::vec3(m_VoxelGrid.cellSize, m_VoxelGrid.cellHeight, m_VoxelGrid.cellSize));
+                        
+                        shader->setMat4("model", model);
+                        
+                        if (isSolid) 
+                            shader->setVec4("ourColor", glm::vec4(1.0f, 0.0f, 0.0f, 0.1f)); // Red for solid
+                        else 
+                            shader->setVec4("ourColor", glm::vec4(0.0f, 1.0f, 0.0f, 0.1f)); // Green for empty
+                        
+                        glDrawElements(GL_TRIANGLES, cubeMesh->indices.size(), GL_UNSIGNED_INT, 0);
+                    }
+                }
+            }
+            glDisable(GL_BLEND);
+        }
+    }
+}
+
+void NavigationSystem::Voxelize()
+{
+    std::cout << "Voxelization step (placeholder)..." << std::endl;
+    if (m_InputTriangles.empty())
+    {
+        std::cout << "No input triangles to voxelize." << std::endl;
+        return;
+    }
+
+    m_VoxelGrid.minimumCorner = glm::vec3(-15.0f, -1.0f, -15.0f);
+    m_VoxelGrid.maximumCorner = glm::vec3(15.0f, 10.0f, 15.0f);
+    m_VoxelGrid.cellSize = 5.f;
+    m_VoxelGrid.cellHeight = 5.f;
+
+    if (m_VoxelGrid.minimumCorner.x >= m_VoxelGrid.maximumCorner.x ||
+        m_VoxelGrid.minimumCorner.y >= m_VoxelGrid.maximumCorner.y ||
+        m_VoxelGrid.minimumCorner.z >= m_VoxelGrid.maximumCorner.z ||
+        m_VoxelGrid.cellSize <= 0.0f || m_VoxelGrid.cellHeight <= 0.0f)
+    {
+        std::cout << "Invalid voxel grid parameters." << std::endl;
+        return;
+    }
+
+    m_VoxelGrid.width = (int)((m_VoxelGrid.maximumCorner.x - m_VoxelGrid.minimumCorner.x) / m_VoxelGrid.cellSize);
+    m_VoxelGrid.depth = (int)((m_VoxelGrid.maximumCorner.z - m_VoxelGrid.minimumCorner.z) / m_VoxelGrid.cellSize);
+    m_VoxelGrid.height = (int)((m_VoxelGrid.maximumCorner.y - m_VoxelGrid.minimumCorner.y) / m_VoxelGrid.cellHeight);
+    int totalVoxels = m_VoxelGrid.width * m_VoxelGrid.depth * m_VoxelGrid.height;
+    std::cout << "Voxel Grid Dimensions: " << m_VoxelGrid.width << " x " << m_VoxelGrid.depth << " x " << m_VoxelGrid.height << " = " << totalVoxels << " voxels." << std::endl;
+
+    m_VoxelGrid.data.assign(totalVoxels, false);
 }
 
 void NavigationSystem::UpdateDebugBuffers()

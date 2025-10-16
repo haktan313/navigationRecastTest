@@ -124,7 +124,7 @@ void Application::Render()
         m_Scene->Render(m_Shader);
     }
     if (m_NavSystem && m_Shader)
-        m_NavSystem->RenderDebugNavmesh(m_Shader);
+        m_NavSystem->RenderDebugNavmesh(m_Shader, *m_Scene);
     
     RenderImGui();
 }
