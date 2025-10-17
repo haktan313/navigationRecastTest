@@ -5,6 +5,9 @@
 NavigationSystem::NavigationSystem() : m_InputTriangles(), m_NavMesh(), m_DebugVAO(0), m_DebugVBO(0)
 {
     std::cout << "NavigationSystem initialized." << std::endl;
+    m_AgentHeight = 2.0f;
+    m_AgentRadius = 0.6f;
+    m_MaxClimb = 0.9f;
 }
 
 NavigationSystem::~NavigationSystem()
@@ -13,6 +16,7 @@ NavigationSystem::~NavigationSystem()
     glDeleteBuffers(1, &m_DebugVBO);
     m_DebugVAO = 0;
     m_DebugVBO = 0;
+    delete[] m_HeightField.spans;
 }
 
 //Debug
@@ -99,13 +103,26 @@ void NavigationSystem::DrawVoxelGrids(Shader* shader, const Scene& scene)
                         model = glm::scale(model, glm::vec3(m_VoxelGrid.cellSize, m_VoxelGrid.cellHeight, m_VoxelGrid.cellSize));
                         
                         shader->setMat4("model", model);
-                        
-                        if (isSolid) 
+                        bool bisWalkableSurface = false;
+                        for (HeightFieldSpan* span = m_HeightField.spans[x + z * m_VoxelGrid.width]; span; span = span->next)
+                        {
+                            if (y == span->spanMax && span->areaID != 0)
+                            {
+                                bisWalkableSurface = true;
+                                break;
+                            }
+                        }
+
+                        if (bisWalkableSurface)
+                            shader->setVec4("ourColor", glm::vec4(0.0f, 0.0f, 1.0f, 0.3f)); // Blue for walkable
+                        else if (isSolid) 
                             shader->setVec4("ourColor", glm::vec4(1.0f, 0.0f, 0.0f, 0.3f)); // Red for solid
                         else 
                             shader->setVec4("ourColor", glm::vec4(0.0f, 1.0f, 0.0f, 0.03f)); // Green for empty
                         
                         glDrawElements(GL_TRIANGLES, cubeMesh->indices.size(), GL_UNSIGNED_INT, 0);
+
+                        
                     }
                 }
             }
@@ -183,6 +200,9 @@ void NavigationSystem::BuildNavMesh(const Scene& scene)
     }
     std::cout << "Collected " << m_InputTriangles.size() << " triangles for NavMesh." << std::endl;
     Voxelize();
+    BuildHeightField();
+    FilterWalkableSurfaces();
+    
     UpdateDebugBuffers();
 }
 
@@ -197,8 +217,8 @@ void NavigationSystem::Voxelize()
 
     m_VoxelGrid.minimumCorner = glm::vec3(-15.0f, -1.0f, -15.0f);
     m_VoxelGrid.maximumCorner = glm::vec3(15.0f, 10.0f, 15.0f);
-    m_VoxelGrid.cellSize = 2.f;
-    m_VoxelGrid.cellHeight = 2.f;
+    m_VoxelGrid.cellSize = 1.f;
+    m_VoxelGrid.cellHeight = 1.f;
 
     if (m_VoxelGrid.minimumCorner.x >= m_VoxelGrid.maximumCorner.x ||
         m_VoxelGrid.minimumCorner.y >= m_VoxelGrid.maximumCorner.y ||
@@ -292,6 +312,89 @@ void NavigationSystem::Rasterization()
     std::cout << "Rasterization complete. Solid voxels: " << solidVoxels << std::endl;
 }
 
+void NavigationSystem::BuildHeightField()
+{
+    m_HeightField.width = m_VoxelGrid.width;
+    m_HeightField.depth = m_VoxelGrid.depth;
+    m_HeightField.cellSize = m_VoxelGrid.cellSize;
+    m_HeightField.cellHeight = m_VoxelGrid.cellHeight;
+    m_HeightField.bmin = m_VoxelGrid.minimumCorner;
+
+    const int numColumns = m_HeightField.width * m_HeightField.depth;
+    m_HeightField.spans = new HeightFieldSpan*[numColumns];
+    memset(m_HeightField.spans, 0, sizeof(HeightFieldSpan*) * numColumns);
+
+    m_HeightField.spanPool.clear();
+    m_HeightField.spanPool.reserve(m_VoxelGrid.width * m_VoxelGrid.depth * m_VoxelGrid.height);
+
+    for (int z = 0; z < m_HeightField.depth; ++z)
+    {
+        for (int x = 0; x < m_HeightField.width; ++x)
+        {
+            HeightFieldSpan* previousSpan = nullptr;
+            for (int y = 0; y < m_VoxelGrid.height; ++y)
+            {
+                int index = x + z * m_VoxelGrid.width + y * m_VoxelGrid.width * m_VoxelGrid.depth;
+                bool bisSolidCurrent = m_VoxelGrid.data[index];
+
+                int previousIndex = index - m_VoxelGrid.width * m_VoxelGrid.depth;
+                bool bisSolidPrevious = (y > 0) ? m_VoxelGrid.data[previousIndex] : false;
+
+                if (bisSolidCurrent != bisSolidPrevious)
+                {
+                    if (bisSolidCurrent)
+                    {
+                        HeightFieldSpan newSpan;
+                        newSpan.spanMin = y;
+                        newSpan.spanMax = y;
+                        newSpan.areaID = 0;
+                        newSpan.next = nullptr;
+
+                        m_HeightField.spanPool.push_back(newSpan);
+                        HeightFieldSpan* currentSpan = &m_HeightField.spanPool.back();
+
+                        if (previousSpan)
+                            previousSpan->next = currentSpan;
+                        else
+                            m_HeightField.spans[x + z * m_HeightField.width] = currentSpan;
+                        previousSpan = currentSpan;
+                    }
+                }
+                if (bisSolidCurrent && previousSpan)
+                {
+                    previousSpan->spanMax = y;
+                }
+            }
+        }
+    }
+    std::cout << "Heightfield built with " << m_HeightField.spanPool.size() << " spans." << std::endl;
+}
+
+void NavigationSystem::FilterWalkableSurfaces()
+{
+    const int walkableHeight = (int)ceilf(m_AgentHeight / m_HeightField.cellHeight);
+    
+    for (auto& span : m_HeightField.spanPool)
+        span.areaID = 1;
+    
+    for (int z = 0; z < m_HeightField.depth; ++z)
+    {
+        for (int x = 0; x < m_HeightField.width; ++x)
+        {
+            for (HeightFieldSpan* span = m_HeightField.spans[x + z * m_HeightField.width]; span; span = span->next)
+            {
+                const int upperSpanFloor = span->next ? (int)span->next->spanMin : m_VoxelGrid.height;
+                const int headroom = upperSpanFloor - (int)span->spanMax;
+                
+                if (headroom < walkableHeight)
+                {
+                    span->areaID = 0;
+                }
+            }
+        }
+    }
+    std::cout << "Walkable surfaces filtered." << std::endl;
+}
 
 // --- Triangle-Box Overlap Test (by Tomas Akenine-Möller) ---
 

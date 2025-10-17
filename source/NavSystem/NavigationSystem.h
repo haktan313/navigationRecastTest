@@ -1,4 +1,5 @@
 #pragma once
+
 #include "Core/Scene.h"
 
 
@@ -13,6 +14,22 @@ struct VoxelGrid
     float cellSize, cellHeight;
     int width, depth, height;
     std::vector<bool> data; // true = walkable, false = not walkable
+};
+
+struct HeightFieldSpan
+{
+    unsigned int spanMin, spanMax;
+    unsigned int areaID;
+    HeightFieldSpan* next;
+};
+struct HeightField
+{
+    int width, depth;
+    glm::vec3 bmin;
+    float cellSize, cellHeight;
+
+    HeightFieldSpan** spans;
+    std::vector<HeightFieldSpan> spanPool;
 };
 
 class NavigationSystem
@@ -37,5 +54,13 @@ private:
     void Voxelize();
     VoxelGrid m_VoxelGrid;
     void Rasterization();
+    void BuildHeightField();
+    HeightField m_HeightField;
+    void FilterWalkableSurfaces();
+    float m_AgentHeight, m_AgentRadius, m_MaxClimb;
+
+
+    
     bool TriBoxOverlap(const float boxcenter[3], const float boxhalfsize[3], const float triverts[3][3]);
+
 };
