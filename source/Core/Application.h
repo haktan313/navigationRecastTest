@@ -5,6 +5,7 @@
 #include "NavSystem/NavigationSystem.h"
 #include "Scene.h"
 #include "Shader.h"
+#include "NavSystem/NavigationSystemDebugTools.h"
 
 class Application
 {
@@ -29,7 +30,7 @@ private:
     Shader* m_Shader;
     Scene* m_Scene;
     NavigationSystem* m_NavSystem;
-    
+
     Camera m_Camera;
 
     float m_DeltaTime, m_LastFrame;

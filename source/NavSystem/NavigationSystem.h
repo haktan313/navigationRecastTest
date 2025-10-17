@@ -1,5 +1,7 @@
 #pragma once
 
+#include "NavigationSystemDebugTools.h"
+#include "Core/Camera.h"
 #include "Core/Scene.h"
 
 
@@ -31,36 +33,42 @@ struct HeightField
     HeightFieldSpan** spans;
     std::vector<HeightFieldSpan> spanPool;
 };
+enum DebugDrawMode
+{
+    DRAWMODE_NONE,
+    DRAWMODE_INPUT_TRIANGLES,
+    DRAWMODE_VOXELS,
+    DRAWMODE_WALKABLE,
+    DRAWMODE_REGIONS
+};
+
 
 class NavigationSystem
 {
 public:
+    DebugDrawMode m_DebugDrawMode = DRAWMODE_NONE;
+    
     NavigationSystem();
     ~NavigationSystem();
     
     void BuildNavMesh(const Scene& scene);
     
-    void RenderDebugNavmesh(Shader* debugShader, const Scene& scene);
+    void RenderDebugData(Camera& camera, Shader* debugShader, const Scene& scene);
 private:
-    void DrawTriangle(Shader* shader, const Scene& scene);
-    void DrawVoxel(Shader* shader, const Scene& scene);
-    void DrawVoxelGrids(Shader* shader, const Scene& scene);
-    unsigned int m_DebugVAO, m_DebugVBO;
-    void UpdateDebugBuffers();
-    
+    NavigationSystemDebugTools* m_DebugTools;
+
     std::vector<Triangle> m_InputTriangles;
-    NavMesh m_NavMesh;
-    
-    void Voxelize();
-    VoxelGrid m_VoxelGrid;
-    void Rasterization();
-    void BuildHeightField();
-    HeightField m_HeightField;
-    void FilterWalkableSurfaces();
     float m_AgentHeight, m_AgentRadius, m_MaxClimb;
 
-
+    NavMesh m_NavMesh;
+    VoxelGrid m_VoxelGrid;
+    HeightField m_HeightField;
+    
+    void Voxelize();
+    void Rasterization();
+    void BuildHeightField();
+    void FilterWalkableSurfaces();
+    void BuldRegions();
     
     bool TriBoxOverlap(const float boxcenter[3], const float boxhalfsize[3], const float triverts[3][3]);
-
 };

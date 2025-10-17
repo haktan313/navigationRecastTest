@@ -1,168 +1,26 @@
 
 #include "NavigationSystem.h"
-#include <glm/ext/matrix_transform.hpp>
+#include <deque>
 
-NavigationSystem::NavigationSystem() : m_InputTriangles(), m_NavMesh(), m_DebugVAO(0), m_DebugVBO(0)
+NavigationSystem::NavigationSystem() : m_InputTriangles(), m_NavMesh()
 {
     std::cout << "NavigationSystem initialized." << std::endl;
     m_AgentHeight = 2.0f;
     m_AgentRadius = 0.6f;
     m_MaxClimb = 0.9f;
+    m_DebugTools = new NavigationSystemDebugTools();
 }
 
 NavigationSystem::~NavigationSystem()
 {
-    glDeleteVertexArrays(1, &m_DebugVAO);
-    glDeleteBuffers(1, &m_DebugVBO);
-    m_DebugVAO = 0;
-    m_DebugVBO = 0;
-    delete[] m_HeightField.spans;
-}
-
-//Debug
-
-void NavigationSystem::RenderDebugNavmesh(Shader* debugShader, const Scene& scene)
-{
-    DrawTriangle(debugShader, scene);
-    DrawVoxel(debugShader, scene);
-    DrawVoxelGrids(debugShader, scene);
-    
-    glBindVertexArray(0);
-}
-
-void NavigationSystem::DrawTriangle(Shader* shader, const Scene& scene)
-{
-    if (m_DebugVAO != 0 && !m_InputTriangles.empty())
+    delete m_DebugTools;
+    m_DebugTools = nullptr;
+    if (m_HeightField.spans)
     {
-        shader->setMat4("model", glm::mat4(1.0f));
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        shader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 0.0f, 1.0f));
-        
-        glBindVertexArray(m_DebugVAO);
-        glDrawArrays(GL_TRIANGLES, 0, m_InputTriangles.size() * 3);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        delete[] m_HeightField.spans;
+        m_HeightField.spans = nullptr;
     }
 }
-
-void NavigationSystem::DrawVoxel(Shader* shader, const Scene& scene)
-{
-    if (m_VoxelGrid.width > 0)
-    {
-        const MeshData* cubeMesh = scene.GetMesh("Cube");
-        if (cubeMesh)
-        {
-            glm::vec3 size = m_VoxelGrid.maximumCorner - m_VoxelGrid.minimumCorner;
-            glm::vec3 center = (m_VoxelGrid.minimumCorner + m_VoxelGrid.maximumCorner) * 0.5f;
-
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, center);
-            model = glm::scale(model, size);
-            shader->setMat4("model", model);
-            shader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 1.0f, 0.5f));
-            
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-            
-            glBindVertexArray(cubeMesh->VAO);
-            glDrawElements(GL_TRIANGLES, cubeMesh->indices.size(), GL_UNSIGNED_INT, 0);
-            
-            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-            glDisable(GL_BLEND);
-        }
-    }
-}
-
-void NavigationSystem::DrawVoxelGrids(Shader* shader, const Scene& scene)
-{
-    if (m_VoxelGrid.width > 0 && !m_VoxelGrid.data.empty())
-    {
-        const MeshData* cubeMesh = scene.GetMesh("Cube");
-        if (cubeMesh)
-        {
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glBindVertexArray(cubeMesh->VAO);
-            
-            for (int z = 0; z < m_VoxelGrid.depth; ++z)
-            {
-                for (int y = 0; y < m_VoxelGrid.height; ++y)
-                {
-                    for (int x = 0; x < m_VoxelGrid.width; ++x)
-                    {
-                        int index = x + z * m_VoxelGrid.width + y * m_VoxelGrid.width * m_VoxelGrid.depth;
-                        bool isSolid = m_VoxelGrid.data[index];
-                        
-                        glm::vec3 pos = {
-                            m_VoxelGrid.minimumCorner.x + (x + 0.5f) * m_VoxelGrid.cellSize,
-                            m_VoxelGrid.minimumCorner.y + (y + 0.5f) * m_VoxelGrid.cellHeight,
-                            m_VoxelGrid.minimumCorner.z + (z + 0.5f) * m_VoxelGrid.cellSize
-                        };
-                        glm::mat4 model = glm::mat4(1.0f);
-                        model = glm::translate(model, pos);
-                        model = glm::scale(model, glm::vec3(m_VoxelGrid.cellSize, m_VoxelGrid.cellHeight, m_VoxelGrid.cellSize));
-                        
-                        shader->setMat4("model", model);
-                        bool bisWalkableSurface = false;
-                        for (HeightFieldSpan* span = m_HeightField.spans[x + z * m_VoxelGrid.width]; span; span = span->next)
-                        {
-                            if (y == span->spanMax && span->areaID != 0)
-                            {
-                                bisWalkableSurface = true;
-                                break;
-                            }
-                        }
-
-                        if (bisWalkableSurface)
-                            shader->setVec4("ourColor", glm::vec4(0.0f, 0.0f, 1.0f, 0.3f)); // Blue for walkable
-                        else if (isSolid) 
-                            shader->setVec4("ourColor", glm::vec4(1.0f, 0.0f, 0.0f, 0.3f)); // Red for solid
-                        else 
-                            shader->setVec4("ourColor", glm::vec4(0.0f, 1.0f, 0.0f, 0.03f)); // Green for empty
-                        
-                        glDrawElements(GL_TRIANGLES, cubeMesh->indices.size(), GL_UNSIGNED_INT, 0);
-
-                        
-                    }
-                }
-            }
-            glDisable(GL_BLEND);
-        }
-    }
-}
-
-void NavigationSystem::UpdateDebugBuffers()
-{
-    if (m_InputTriangles.empty())
-        return;
-
-    std::vector<float> debugVerts;
-    debugVerts.reserve(m_InputTriangles.size() * 3 * 3);
-    for (const auto& tri : m_InputTriangles)
-        for (int i = 0; i < 3; ++i)
-        {
-            debugVerts.push_back(tri.verts[i].x);
-            debugVerts.push_back(tri.verts[i].y);
-            debugVerts.push_back(tri.verts[i].z);
-        }
-
-    if (m_DebugVAO == 0)
-    {
-        glGenVertexArrays(1, &m_DebugVAO);
-        glGenBuffers(1, &m_DebugVBO);
-    }
-    
-    glBindVertexArray(m_DebugVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, m_DebugVBO);
-    glBufferData(GL_ARRAY_BUFFER, debugVerts.size() * sizeof(float), &debugVerts[0], GL_DYNAMIC_DRAW);
-    
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glBindVertexArray(0);
-}
-
-// NavMesh Generation
 
 void NavigationSystem::BuildNavMesh(const Scene& scene)
 {
@@ -202,8 +60,16 @@ void NavigationSystem::BuildNavMesh(const Scene& scene)
     Voxelize();
     BuildHeightField();
     FilterWalkableSurfaces();
-    
-    UpdateDebugBuffers();
+    BuldRegions();
+
+    if (m_DebugTools)
+        m_DebugTools->UpdateDebugBuffers(m_InputTriangles);
+}
+
+void NavigationSystem::RenderDebugData(Camera& camera, Shader* debugShader, const Scene& scene)
+{
+    if (m_DebugTools)
+        m_DebugTools->RenderDebugData(camera, debugShader, scene, m_InputTriangles, m_VoxelGrid, m_HeightField, m_DebugDrawMode);
 }
 
 void NavigationSystem::Voxelize()
@@ -394,6 +260,71 @@ void NavigationSystem::FilterWalkableSurfaces()
         }
     }
     std::cout << "Walkable surfaces filtered." << std::endl;
+}
+
+void NavigationSystem::BuldRegions()
+{
+    std::cout << "Building regions..." << std::endl;
+    if (m_HeightField.width == 0 || m_HeightField.depth == 0)
+        return;
+
+    const int walkableClimb = m_MaxClimb > 0 ? (int)floorf(m_MaxClimb / m_HeightField.cellHeight) : 0;
+    
+    unsigned int regionId = 2;
+    
+    struct SpanLocation {
+        int x, z;
+        HeightFieldSpan* span;
+    };
+    
+    for (int z = 0; z < m_HeightField.depth; ++z)
+    {
+        for (int x = 0; x < m_HeightField.width; ++x)
+        {
+            for (HeightFieldSpan* span = m_HeightField.spans[x + z * m_HeightField.width]; span; span = span->next)
+            {
+                if (span->areaID == 1)
+                {
+                    std::deque<SpanLocation> openList;
+                    openList.push_back({x, z, span});
+                    span->areaID = regionId;
+
+                    while (!openList.empty())
+                    {
+                        SpanLocation current = openList.front();
+                        openList.pop_front();
+                        
+                        for (int dir = 0; dir < 4; ++dir)
+                        {
+                            int dx[] = {-1, 0, 1, 0};
+                            int dz[] = {0, -1, 0, 1};
+                            int nx = current.x + dx[dir];
+                            int nz = current.z + dz[dir];
+                            
+                            if (nx < 0 || nz < 0 || nx >= m_HeightField.width || nz >= m_HeightField.depth)
+                                continue;
+                            
+                            for (HeightFieldSpan* neighborSpan = m_HeightField.spans[nx + nz * m_HeightField.width]; neighborSpan; neighborSpan = neighborSpan->next)
+                            {
+                                if (neighborSpan->areaID == 1)
+                                {
+                                    const int heightDiff = abs((int)current.span->spanMax - (int)neighborSpan->spanMax);
+                                    if (heightDiff <= walkableClimb)
+                                    {
+                                        neighborSpan->areaID = regionId;
+                                        openList.push_back({nx, nz, neighborSpan});
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    regionId++;
+                }
+            }
+        }
+    }
+
+    std::cout << "Regions built. Total regions found: " << regionId - 2 << std::endl;
 }
 
 // --- Triangle-Box Overlap Test (by Tomas Akenine-Möller) ---

@@ -124,7 +124,7 @@ void Application::Render()
         m_Scene->Render(m_Shader);
     }
     if (m_NavSystem && m_Shader)
-        m_NavSystem->RenderDebugNavmesh(m_Shader, *m_Scene);
+        m_NavSystem->RenderDebugData(m_Camera,m_Shader, *m_Scene);
     
     RenderImGui();
 }
@@ -139,6 +139,11 @@ void Application::RenderImGui()
     if (ImGui::Button("Build NavMesh"))
         if (m_NavSystem && m_Scene)
             m_NavSystem->BuildNavMesh(*m_Scene);
+    if (m_NavSystem) {
+        const char* items[] = { "None", "Input Triangles", "Voxels (Solid)", "Walkable Surfaces", "Regions" };
+        ImGui::Combo("Debug Draw", (int*)&m_NavSystem->m_DebugDrawMode, items, IM_ARRAYSIZE(items));
+    }
+    
     ImGui::End();
 
     ImGui::Render();
