@@ -140,7 +140,7 @@ void Application::RenderImGui()
         if (m_NavSystem && m_Scene)
             m_NavSystem->BuildNavMesh(*m_Scene);
     if (m_NavSystem) {
-        const char* items[] = { "None", "Input Triangles", "Voxels (Solid)", "Walkable Surfaces", "Regions" };
+        const char* items[] = { "None", "Input Triangles", "Voxels (Solid)", "Walkable Surfaces", "Regions", "Connections", "Contours" };
         ImGui::Combo("Debug Draw", (int*)&m_NavSystem->m_DebugDrawMode, items, IM_ARRAYSIZE(items));
     }
     

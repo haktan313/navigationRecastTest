@@ -23,6 +23,8 @@ struct HeightFieldSpan
     unsigned int spanMin, spanMax;
     unsigned int areaID;
     HeightFieldSpan* next;
+
+    unsigned int connections[4]; // Connections to neighboring spans
 };
 struct HeightField
 {
@@ -33,13 +35,29 @@ struct HeightField
     HeightFieldSpan** spans;
     std::vector<HeightFieldSpan> spanPool;
 };
+
+struct Contour
+{
+    std::vector<int> vertices;
+    int regionID;
+};
+struct ContourSet
+{
+    std::vector<Contour> contours;
+    glm::vec3 bmin;
+    float cellSize, cellHeight;
+};
+
 enum DebugDrawMode
 {
     DRAWMODE_NONE,
     DRAWMODE_INPUT_TRIANGLES,
     DRAWMODE_VOXELS,
     DRAWMODE_WALKABLE,
-    DRAWMODE_REGIONS
+    DRAWMODE_REGIONS,
+    DRAWMODE_CONNECTIONS,
+    DRAWMODE_CONTOURS,
+    DRAWMODE_NAVMESH_FINAL
 };
 
 
@@ -63,12 +81,15 @@ private:
     NavMesh m_NavMesh;
     VoxelGrid m_VoxelGrid;
     HeightField m_HeightField;
+    ContourSet m_ContourSet;
     
     void Voxelize();
     void Rasterization();
     void BuildHeightField();
     void FilterWalkableSurfaces();
     void BuldRegions();
+    void BuildConnections();
+    void BuildContours();
     
     bool TriBoxOverlap(const float boxcenter[3], const float boxhalfsize[3], const float triverts[3][3]);
 };

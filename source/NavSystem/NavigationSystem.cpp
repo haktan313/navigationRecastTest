@@ -61,6 +61,8 @@ void NavigationSystem::BuildNavMesh(const Scene& scene)
     BuildHeightField();
     FilterWalkableSurfaces();
     BuldRegions();
+    BuildConnections();
+    BuildContours();
 
     if (m_DebugTools)
         m_DebugTools->UpdateDebugBuffers(m_InputTriangles);
@@ -69,7 +71,7 @@ void NavigationSystem::BuildNavMesh(const Scene& scene)
 void NavigationSystem::RenderDebugData(Camera& camera, Shader* debugShader, const Scene& scene)
 {
     if (m_DebugTools)
-        m_DebugTools->RenderDebugData(camera, debugShader, scene, m_InputTriangles, m_VoxelGrid, m_HeightField, m_DebugDrawMode);
+        m_DebugTools->RenderDebugData(camera, debugShader, scene, m_InputTriangles, m_VoxelGrid, m_HeightField, m_ContourSet, m_DebugDrawMode);
 }
 
 void NavigationSystem::Voxelize()
@@ -326,6 +328,182 @@ void NavigationSystem::BuldRegions()
 
     std::cout << "Regions built. Total regions found: " << regionId - 2 << std::endl;
 }
+
+void NavigationSystem::BuildConnections()
+{
+    std::cout << "Building connections between spans..." << std::endl;
+
+    const int w = m_HeightField.width;
+    const int d = m_HeightField.depth;
+    
+    const int walkableClimb = (m_MaxClimb > 0) ? (int)floorf(m_MaxClimb / m_HeightField.cellHeight) : 0;
+    
+    for (int z = 0; z < d; ++z)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            for (HeightFieldSpan* span = m_HeightField.spans[x + z * w]; span; span = span->next)
+            {
+                for (int i = 0; i < 4; ++i)
+                    span->connections[i] = 0;
+
+                if (span->areaID == 0)
+                    continue;
+
+                for (int dir = 0; dir < 4; ++dir)
+                {
+                    int dx[] = {-1, 0, 1, 0};
+                    int dz[] = {0, -1, 0, 1};
+                    int nx = x + dx[dir];
+                    int nz = z + dz[dir];
+                    
+                    if (nx < 0 || nz < 0 || nx >= w || nz >= d)
+                        continue;
+                    
+                    for (HeightFieldSpan* neighborSpan = m_HeightField.spans[nx + nz * w]; neighborSpan; neighborSpan = neighborSpan->next)
+                    {
+                        if (neighborSpan->areaID == 0)
+                            continue;
+                        
+                        const int heightDiff = abs((int)span->spanMax - (int)neighborSpan->spanMax);
+                        if (heightDiff <= walkableClimb)
+                        {
+                            const size_t neighborIndex = (neighborSpan - &m_HeightField.spanPool[0]) + 1;
+                            span->connections[dir] = neighborIndex;
+                            break; 
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "Connections built." << std::endl;
+}
+
+void NavigationSystem::BuildContours()
+{
+   std::cout << "Building contours and simplifying..." << std::endl;
+    m_ContourSet.contours.clear();
+    if (m_HeightField.width == 0 || m_HeightField.depth == 0 || m_HeightField.spanPool.empty())
+        return;
+
+    m_ContourSet.bmin = m_HeightField.bmin;
+    m_ContourSet.cellSize = m_HeightField.cellSize;
+    m_ContourSet.cellHeight = m_HeightField.cellHeight;
+
+    const int w = m_HeightField.width;
+    const int d = m_HeightField.depth;
+    
+    std::vector<unsigned char> flags(m_HeightField.spanPool.size(), 0);
+
+    for (int z = 0; z < d; ++z) {
+        for (int x = 0; x < w; ++x) {
+            for (HeightFieldSpan* span = m_HeightField.spans[x + z * w]; span; span = span->next) {
+                if (span->areaID == 0 || (flags[span - &m_HeightField.spanPool[0]] & 0xF) == 0xF) continue;
+                
+                size_t spanIndex = span - &m_HeightField.spanPool[0];
+
+                for (int dir = 0; dir < 4; ++dir) {
+                    if (flags[spanIndex] & (1 << dir)) continue;
+
+                    unsigned int neighborRegion = 0;
+                    if (span->connections[dir] > 0)
+                        neighborRegion = m_HeightField.spanPool[span->connections[dir] - 1].areaID;
+
+                    if (neighborRegion != span->areaID) {
+                        
+                        // --- STAGE 1: Trace Raw Contour ---
+                        std::vector<int> rawVerts;
+                        int startX = x;
+                        int startZ = z;
+                        int startDir = dir;
+
+                        int currentX = x;
+                        int currentZ = z;
+                        int currentDir = dir;
+
+                        for (int i = 0; i < 65535; ++i) {
+                            HeightFieldSpan* currentSpan = m_HeightField.spans[currentX + currentZ * w];
+                            while(currentSpan && currentSpan->areaID != span->areaID)
+                                currentSpan = currentSpan->next;
+                            if(!currentSpan) break;
+                            
+                            size_t currentSpanIndex = currentSpan - &m_HeightField.spanPool[0];
+                            flags[currentSpanIndex] |= (1 << currentDir);
+
+                            int px = currentX;
+                            int py = currentSpan->spanMax;
+                            int pz = currentZ;
+                             switch (currentDir) {
+                                case 0: pz++; break;
+                                case 1: px++; pz++; break;
+                                case 2: px++; break;
+                            }
+                            
+                            unsigned int r = (currentSpan->connections[currentDir] > 0) ? m_HeightField.spanPool[currentSpan->connections[currentDir] - 1].areaID : 0;
+                            
+                            rawVerts.push_back(px);
+                            rawVerts.push_back(py);
+                            rawVerts.push_back(pz);
+                            rawVerts.push_back(r);
+                            
+                            HeightFieldSpan* neighborSpan = (currentSpan->connections[currentDir] > 0) ? &m_HeightField.spanPool[currentSpan->connections[currentDir]-1] : nullptr;
+                            
+                            if (neighborSpan && neighborSpan->areaID == span->areaID)
+                            {
+                                int dx[] = {-1, 0, 1, 0};
+                                int dz[] = {0, -1, 0, 1};
+                                currentX += dx[currentDir];
+                                currentZ += dz[currentDir];
+                                currentDir = (currentDir + 1) % 4; 
+                            }
+                            else
+                            {
+                                currentDir = (currentDir + 3) % 4;
+                            }
+                            
+                            if (currentX == startX && currentZ == startZ && currentDir == startDir) break;
+                        }
+
+                        // --- STAGE 2: Simplify Contour ---
+                        if (rawVerts.size() < 12) continue;
+                        
+                        Contour newContour;
+                        newContour.regionID = span->areaID;
+
+                        // Add the first vertex, it's always part of the simplified contour.
+                        newContour.vertices.insert(newContour.vertices.end(), rawVerts.begin(), rawVerts.begin() + 4);
+                        
+                        for (size_t i = 1; i < rawVerts.size() / 4 - 1; ++i)
+                        {
+                            const int* v_prev = &newContour.vertices.back() - 3;
+                            const int* v_curr = &rawVerts[i*4];
+                            const int* v_next = &rawVerts[(i+1)*4];
+                            
+                            // If the current vertex is not on the same line as previous and next, add it.
+                            int dx1 = v_curr[0] - v_prev[0];
+                            int dz1 = v_curr[2] - v_prev[2];
+                            int dx2 = v_next[0] - v_curr[0];
+                            int dz2 = v_next[2] - v_curr[2];
+
+                            if (dx1 * dz2 - dz1 * dx2 != 0) // Cross product is not zero, so not collinear
+                            {
+                                newContour.vertices.push_back(v_curr[0]);
+                                newContour.vertices.push_back(v_curr[1]);
+                                newContour.vertices.push_back(v_curr[2]);
+                                newContour.vertices.push_back(v_curr[3]);
+                            }
+                        }
+                        
+                        m_ContourSet.contours.push_back(newContour);
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "Built and simplified " << m_ContourSet.contours.size() << " complete contours." << std::endl;
+}
+
 
 // --- Triangle-Box Overlap Test (by Tomas Akenine-Möller) ---
 

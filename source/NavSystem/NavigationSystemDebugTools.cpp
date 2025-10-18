@@ -3,7 +3,7 @@
 
 //Debug
 
-NavigationSystemDebugTools::NavigationSystemDebugTools() : m_DebugVAO(0), m_DebugVBO(0)
+NavigationSystemDebugTools::NavigationSystemDebugTools()
 {
 
 }
@@ -16,7 +16,8 @@ NavigationSystemDebugTools::~NavigationSystemDebugTools()
     m_DebugVBO = 0;
 }
 
-void NavigationSystemDebugTools::RenderDebugData(Camera& camera, Shader* debugShader, const Scene& scene, const std::vector<Triangle>& inputTriangles, const VoxelGrid& voxelGrid, const HeightField& heightField, DebugDrawMode debugDrawMode)
+void NavigationSystemDebugTools::RenderDebugData(Camera& camera, Shader* debugShader, const Scene& scene, const std::vector<Triangle>& inputTriangles, const VoxelGrid& voxelGrid, HeightField& heightField,
+    const ContourSet& contourSet, DebugDrawMode debugDrawMode)
 {
     debugShader->use();
     glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), 1280.0f/720.0f, 0.1f, 100.0f);
@@ -39,6 +40,12 @@ void NavigationSystemDebugTools::RenderDebugData(Camera& camera, Shader* debugSh
             break;
         case DRAWMODE_REGIONS:
             DrawVoxels_Regions(debugShader, scene, heightField);
+            break;
+        case DRAWMODE_CONNECTIONS:
+            DrawConnections(debugShader, heightField);
+            break;
+        case DRAWMODE_CONTOURS:
+            DrawContours(debugShader, contourSet);
             break;
         case DRAWMODE_NONE:
             break;
@@ -238,6 +245,128 @@ void NavigationSystemDebugTools::DrawVoxels_Regions(Shader* shader, const Scene&
         }
     }
     glDisable(GL_BLEND);
+}
+
+void NavigationSystemDebugTools::DrawConnections(Shader* shader, HeightField& m_HeightField)
+{
+    if (m_HeightField.width == 0 || m_HeightField.spanPool.empty())
+        return;
+    
+    std::vector<float> lineVerts;
+
+    const int w = m_HeightField.width;
+    const int d = m_HeightField.depth;
+    
+    for (int z = 0; z < d; ++z)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            for (HeightFieldSpan* span = m_HeightField.spans[x + z * w]; span; span = span->next)
+            {
+                if (span->areaID == 0)
+                    continue;
+                
+                glm::vec3 p0 =
+                {
+                    m_HeightField.bmin.x + (x + 0.5f) * m_HeightField.cellSize,
+                    m_HeightField.bmin.y + (span->spanMax + 1) * m_HeightField.cellHeight,
+                    m_HeightField.bmin.z + (z + 0.5f) * m_HeightField.cellSize
+                };
+                
+                for (int dir = 0; dir < 4; ++dir)
+                {
+                    unsigned int connIndex = span->connections[dir];
+                    if (connIndex == 0)
+                        continue;
+                    
+                    HeightFieldSpan* neighborSpan = &m_HeightField.spanPool[connIndex - 1];
+                    int dx[] = {-1, 0, 1, 0};
+                    int dz[] = {0, -1, 0, 1};
+                    int nx = x + dx[dir];
+                    int nz = z + dz[dir];
+                    
+                    glm::vec3 p1 =
+                    {
+                        m_HeightField.bmin.x + (nx + 0.5f) * m_HeightField.cellSize,
+                        m_HeightField.bmin.y + (neighborSpan->spanMax + 1) * m_HeightField.cellHeight,
+                        m_HeightField.bmin.z + (nz + 0.5f) * m_HeightField.cellSize
+                    };
+                    
+                    lineVerts.push_back(p0.x); lineVerts.push_back(p0.y); lineVerts.push_back(p0.z);
+                    lineVerts.push_back(p1.x); lineVerts.push_back(p1.y); lineVerts.push_back(p1.z);
+                }
+            }
+        }
+    }
+    
+    if (lineVerts.empty()) return;
+    
+    if (m_ConnectionLinesVAO == 0)
+    {
+        glGenVertexArrays(1, &m_ConnectionLinesVAO);
+        glGenBuffers(1, &m_ConnectionLinesVBO);
+    }
+    
+    glBindVertexArray(m_ConnectionLinesVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_ConnectionLinesVBO);
+    glBufferData(GL_ARRAY_BUFFER, lineVerts.size() * sizeof(float), lineVerts.data(), GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    shader->setMat4("model", glm::mat4(1.0f));
+    shader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+    glLineWidth(2.0f);
+    glDrawArrays(GL_LINES, 0, lineVerts.size() / 3);
+    glLineWidth(1.0f);
+}
+
+void NavigationSystemDebugTools::DrawContours(Shader* shader, const ContourSet& contourSet)
+{
+    if (contourSet.contours.empty()) return;
+
+    std::vector<float> lineVerts;
+    const float cs = contourSet.cellSize;
+    const float ch = contourSet.cellHeight;
+    const glm::vec3& bmin = contourSet.bmin;
+
+    for (const auto& contour : contourSet.contours) {
+        if (contour.vertices.empty()) continue;
+
+        for (size_t i = 0; i < contour.vertices.size() / 4; ++i) {
+            const int* v0_data = &contour.vertices[i * 4];
+            // Connect to the next vertex in the list, wrapping around at the end
+            const int* v1_data = &contour.vertices[((i + 1) % (contour.vertices.size() / 4)) * 4];
+
+            glm::vec3 p0 = { bmin.x + v0_data[0] * cs, bmin.y + (v0_data[1] + 1) * ch + 0.1f, bmin.z + v0_data[2] * cs };
+            glm::vec3 p1 = { bmin.x + v1_data[0] * cs, bmin.y + (v1_data[1] + 1) * ch + 0.1f, bmin.z + v1_data[2] * cs };
+            
+            lineVerts.push_back(p0.x); lineVerts.push_back(p0.y); lineVerts.push_back(p0.z);
+            lineVerts.push_back(p1.x); lineVerts.push_back(p1.y); lineVerts.push_back(p1.z);
+        }
+    }
+
+    if (lineVerts.empty()) return;
+
+    if (m_ContourLinesVAO == 0) {
+        glGenVertexArrays(1, &m_ContourLinesVAO);
+        glGenBuffers(1, &m_ContourLinesVBO);
+    }
+    
+    glBindVertexArray(m_ContourLinesVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_ContourLinesVBO);
+    glBufferData(GL_ARRAY_BUFFER, lineVerts.size() * sizeof(float), lineVerts.data(), GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    shader->setMat4("model", glm::mat4(1.0f));
+    shader->setVec4("ourColor", glm::vec4(1.0f, 0.0f, 1.0f, 1.0f)); // Magenta for high visibility
+
+    glLineWidth(3.0f);
+    glDrawArrays(GL_LINES, 0, lineVerts.size() / 3);
+    glLineWidth(1.0f);
+
+    glBindVertexArray(0);
 }
 
 void NavigationSystemDebugTools::UpdateDebugBuffers(const std::vector<Triangle>& m_InputTriangles)
